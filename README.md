@@ -1,4 +1,17 @@
 
+# Mini-LLM Exercise — Transformer Decoder Ablations
+
+This submission extends Andrej Karpathy's nanoGPT with reproducible character-level Shakespeare experiments for:
+
+- RMSNorm versus the baseline pre-LayerNorm;
+- SwiGLU (with approximately matched MLP parameter count) versus GELU;
+- NoPE and RoPE versus learned absolute position embeddings; and
+- Grouped-query attention, group size 2, versus multi-head attention.
+
+See [EXPERIMENT.md](EXPERIMENT.md) for the answers to each sub-question, experimental controls, commands, plot generation, and the results table. Implementations are in `model.py`, and runnable configs are in `config/ablation_*.py`.
+
+---
+
 # nanoGPT
 
 ![nanoGPT](assets/nanogpt.jpg)
