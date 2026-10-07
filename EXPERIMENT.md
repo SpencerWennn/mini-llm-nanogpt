@@ -37,7 +37,11 @@ python3 scripts/plot_losses.py out/baseline out/rmsnorm out/swiglu out/nope out/
 
 ## Results
 
-All six runs below used the same Shakespeare split, seed, model depth/width, optimizer schedule, and 5,000-step budget on a Colab T4 GPU. The metric is the minimum held-out validation loss over the scheduled evaluations; lower is better. Raw metric logs and the loss plot are committed with this report.
+### Experimental controls
+
+To make the ablations comparable, every run changes only the requested component. All six runs used the same Shakespeare split, single-GPU random seed (**1337**), model depth/width, optimizer schedule, and **5,000** training iterations on a Colab T4 GPU. The initial learning rate was **1e-3** for the baseline and every ablation; **no experiment-specific learning-rate tuning was used**.
+
+The metric below is the minimum held-out validation loss over the scheduled evaluations; lower is better. Raw metric logs and the loss plot are committed with this report.
 
 | Experiment | Best validation loss | Notes |
 | --- | ---: | --- |
