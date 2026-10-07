@@ -20,6 +20,7 @@ import os
 import time
 import math
 import pickle
+import json
 from contextlib import nullcontext
 
 import numpy as np
@@ -54,6 +55,11 @@ n_head = 12
 n_embd = 768
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
+# architecture experiment switches (the defaults reproduce nanoGPT)
+norm_type = 'layernorm' # 'layernorm' or 'rmsnorm'
+mlp_type = 'gelu' # 'gelu' or 'swiglu'
+positional_encoding = 'learned' # 'learned', 'nope', or 'rope'
+gqa_group_size = 1 # 1 = MHA; 2 = two query heads share K/V
 # adamw optimizer
 learning_rate = 6e-4 # max learning rate
 max_iters = 600000 # total number of training iterations
@@ -145,7 +151,9 @@ if os.path.exists(meta_path):
 
 # model init
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
-                  bias=bias, vocab_size=None, dropout=dropout) # start with model_args from command line
+                  bias=bias, vocab_size=None, dropout=dropout, norm_type=norm_type,
+                  mlp_type=mlp_type, positional_encoding=positional_encoding,
+                  gqa_group_size=gqa_group_size) # start with model_args from command line
 if init_from == 'scratch':
     # init a new model from scratch
     print("Initializing a new model from scratch")
@@ -163,7 +171,8 @@ elif init_from == 'resume':
     checkpoint_model_args = checkpoint['model_args']
     # force these config attributes to be equal otherwise we can't even resume training
     # the rest of the attributes (e.g. dropout) can stay as desired from command line
-    for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
+    for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size',
+              'norm_type', 'mlp_type', 'positional_encoding', 'gqa_group_size']:
         model_args[k] = checkpoint_model_args[k]
     # create the model
     gptconf = GPTConfig(**model_args)
@@ -246,6 +255,13 @@ if wandb_log and master_process:
     import wandb
     wandb.init(project=wandb_project, name=wandb_run_name, config=config)
 
+# A local, dependency-free record that plotting scripts can consume.
+metrics_file = None
+if master_process:
+    metrics_file = open(os.path.join(out_dir, 'metrics.jsonl'), 'a', buffering=1)
+    if metrics_file.tell() == 0:
+        metrics_file.write(json.dumps({'config': config}) + '\n')
+
 # training loop
 X, Y = get_batch('train') # fetch the very first batch
 t0 = time.time()
@@ -263,6 +279,8 @@ while True:
     if iter_num % eval_interval == 0 and master_process:
         losses = estimate_loss()
         print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        metrics_file.write(json.dumps({'iter': iter_num, 'train_loss': float(losses['train']),
+                                       'val_loss': float(losses['val']), 'lr': lr}) + '\n')
         if wandb_log:
             wandb.log({
                 "iter": iter_num,

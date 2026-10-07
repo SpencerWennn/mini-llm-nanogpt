@@ -26,13 +26,46 @@ class LayerNorm(nn.Module):
     def forward(self, input):
         return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
 
+
+class RMSNorm(nn.Module):
+    """Root-mean-square LayerNorm (Zhang & Sennrich, 2019)."""
+
+    def __init__(self, ndim, bias=False):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(ndim))
+        # Kept for API compatibility with LayerNorm; RMSNorm has no additive bias.
+
+    def forward(self, input):
+        rms = input.pow(2).mean(dim=-1, keepdim=True)
+        return input * torch.rsqrt(rms + 1e-5) * self.weight
+
+
+def apply_rope(x):
+    """Apply rotary positional embeddings to (batch, heads, time, head_dim)."""
+    _, _, t, d = x.shape
+    assert d % 2 == 0, "RoPE requires an even attention head dimension"
+    inv_freq = 1.0 / (10000 ** (torch.arange(0, d, 2, device=x.device,
+                                               dtype=torch.float32) / d))
+    positions = torch.arange(t, device=x.device, dtype=torch.float32)
+    angles = torch.outer(positions, inv_freq).to(dtype=x.dtype)
+    cos, sin = angles.cos()[None, None], angles.sin()[None, None]
+    x_even, x_odd = x[..., ::2], x[..., 1::2]
+    rotated = torch.stack((x_even * cos - x_odd * sin,
+                           x_even * sin + x_odd * cos), dim=-1)
+    return rotated.flatten(-2)
+
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
         super().__init__()
         assert config.n_embd % config.n_head == 0
+        assert config.n_head % config.gqa_group_size == 0
+        self.n_kv_head = config.n_head // config.gqa_group_size
+        self.head_dim = config.n_embd // config.n_head
         # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
+        self.c_attn = nn.Linear(config.n_embd,
+                                config.n_embd + 2 * self.n_kv_head * self.head_dim,
+                                bias=config.bias)
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # regularization
@@ -41,6 +74,7 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
+        self.positional_encoding = config.positional_encoding
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if not self.flash:
@@ -53,10 +87,18 @@ class CausalSelfAttention(nn.Module):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        q, k, v = self.c_attn(x).split((self.n_embd,
+                                        self.n_kv_head * self.head_dim,
+                                        self.n_kv_head * self.head_dim), dim=2)
+        k = k.view(B, T, self.n_kv_head, self.head_dim).transpose(1, 2)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        v = v.view(B, T, self.n_kv_head, self.head_dim).transpose(1, 2)
+        if self.positional_encoding == 'rope':
+            q, k = apply_rope(q), apply_rope(k)
+        # Expand K/V heads so each group of queries shares one K/V head.
+        if self.n_kv_head != self.n_head:
+            k = k.repeat_interleave(self.n_head // self.n_kv_head, dim=1)
+            v = v.repeat_interleave(self.n_head // self.n_kv_head, dim=1)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
@@ -79,14 +121,26 @@ class MLP(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
-        self.gelu    = nn.GELU()
-        self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+        self.mlp_type = config.mlp_type
+        if self.mlp_type == 'gelu':
+            hidden_dim = 4 * config.n_embd
+            self.c_fc = nn.Linear(config.n_embd, hidden_dim, bias=config.bias)
+            self.gelu = nn.GELU()
+        elif self.mlp_type == 'swiglu':
+            # 3 projections of 8d/3 make ~8d^2 parameters, matching GELU MLP.
+            hidden_dim = int(8 * config.n_embd / 3)
+            self.c_fc = nn.Linear(config.n_embd, hidden_dim, bias=config.bias)
+            self.c_gate = nn.Linear(config.n_embd, hidden_dim, bias=config.bias)
+        else:
+            raise ValueError(f"Unknown mlp_type: {self.mlp_type}")
+        self.c_proj  = nn.Linear(hidden_dim, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
-        x = self.c_fc(x)
-        x = self.gelu(x)
+        if self.mlp_type == 'gelu':
+            x = self.gelu(self.c_fc(x))
+        else:
+            x = F.silu(self.c_gate(x)) * self.c_fc(x)
         x = self.c_proj(x)
         x = self.dropout(x)
         return x
@@ -95,9 +149,10 @@ class Block(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
+        norm_cls = LayerNorm if config.norm_type == 'layernorm' else RMSNorm
+        self.ln_1 = norm_cls(config.n_embd, bias=config.bias)
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
+        self.ln_2 = norm_cls(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
 
     def forward(self, x):
@@ -114,6 +169,10 @@ class GPTConfig:
     n_embd: int = 768
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    norm_type: str = 'layernorm' # 'layernorm' or 'rmsnorm'
+    mlp_type: str = 'gelu' # 'gelu' or 'swiglu'
+    positional_encoding: str = 'learned' # 'learned', 'nope', or 'rope'
+    gqa_group_size: int = 1 # 1 is regular multi-head attention
 
 class GPT(nn.Module):
 
@@ -123,13 +182,15 @@ class GPT(nn.Module):
         assert config.block_size is not None
         self.config = config
 
-        self.transformer = nn.ModuleDict(dict(
+        transformer_modules = dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
-            wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f = LayerNorm(config.n_embd, bias=config.bias),
-        ))
+            ln_f = LayerNorm(config.n_embd, bias=config.bias) if config.norm_type == 'layernorm' else RMSNorm(config.n_embd),
+        )
+        if config.positional_encoding == 'learned':
+            transformer_modules['wpe'] = nn.Embedding(config.block_size, config.n_embd)
+        self.transformer = nn.ModuleDict(transformer_modules)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
@@ -156,7 +217,8 @@ class GPT(nn.Module):
         """
         n_params = sum(p.numel() for p in self.parameters())
         if non_embedding:
-            n_params -= self.transformer.wpe.weight.numel()
+            if 'wpe' in self.transformer:
+                n_params -= self.transformer.wpe.weight.numel()
         return n_params
 
     def _init_weights(self, module):
@@ -171,12 +233,15 @@ class GPT(nn.Module):
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
-        pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
-        pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
-        x = self.transformer.drop(tok_emb + pos_emb)
+        if self.config.positional_encoding == 'learned':
+            pos = torch.arange(0, t, dtype=torch.long, device=device)
+            x = tok_emb + self.transformer.wpe(pos)
+        else:
+            x = tok_emb
+        x = self.transformer.drop(x)
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
@@ -198,7 +263,8 @@ class GPT(nn.Module):
         # but want to use a smaller block size for some smaller, simpler model
         assert block_size <= self.config.block_size
         self.config.block_size = block_size
-        self.transformer.wpe.weight = nn.Parameter(self.transformer.wpe.weight[:block_size])
+        if 'wpe' in self.transformer:
+            self.transformer.wpe.weight = nn.Parameter(self.transformer.wpe.weight[:block_size])
         for block in self.transformer.h:
             if hasattr(block.attn, 'bias'):
                 block.attn.bias = block.attn.bias[:,:,:block_size,:block_size]
