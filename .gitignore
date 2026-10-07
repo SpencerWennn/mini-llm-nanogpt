@@ -11,5 +11,8 @@ input.txt
 env/
 venv/
 .venv/
-out/
-results/
+out/*
+!out/*/
+!out/*/metrics.jsonl
+results/*
+!results/loss_comparison.png

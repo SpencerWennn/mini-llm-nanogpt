@@ -1,0 +1,22 @@
+{"config": {"out_dir": "out/nope", "eval_interval": 250, "log_interval": 10, "eval_iters": 200, "eval_only": false, "always_save_checkpoint": false, "init_from": "scratch", "wandb_log": false, "wandb_project": "owt", "wandb_run_name": "gpt2", "dataset": "shakespeare_char", "gradient_accumulation_steps": 1, "batch_size": 64, "block_size": 256, "n_layer": 6, "n_head": 6, "n_embd": 384, "dropout": 0.2, "bias": false, "norm_type": "layernorm", "mlp_type": "gelu", "positional_encoding": "nope", "gqa_group_size": 1, "learning_rate": 0.001, "max_iters": 5000, "weight_decay": 0.1, "beta1": 0.9, "beta2": 0.99, "grad_clip": 1.0, "decay_lr": true, "warmup_iters": 100, "lr_decay_iters": 5000, "min_lr": 0.0001, "backend": "nccl", "device": "cuda", "dtype": "float16", "compile": false}}
+{"iter": 0, "train_loss": 4.195594310760498, "val_loss": 4.2024335861206055, "lr": 9.900990099009901e-06}
+{"iter": 250, "train_loss": 2.3038580417633057, "val_loss": 2.3743271827697754, "lr": 0.0009979206008271391}
+{"iter": 500, "train_loss": 1.8633099794387817, "val_loss": 2.0203685760498047, "lr": 0.0009852826883675631}
+{"iter": 750, "train_loss": 1.5844321250915527, "val_loss": 1.777207374572754, "lr": 0.0009614856803571157}
+{"iter": 1000, "train_loss": 1.4448928833007812, "val_loss": 1.6659643650054932, "lr": 0.0009271396472013282}
+{"iter": 1250, "train_loss": 1.3886234760284424, "val_loss": 1.6334936618804932, "lr": 0.000883125098683892}
+{"iter": 1500, "train_loss": 1.3323899507522583, "val_loss": 1.5925183296203613, "lr": 0.0008305704108364302}
+{"iter": 1750, "train_loss": 1.2860339879989624, "val_loss": 1.5599833726882935, "lr": 0.0007708228984017721}
+{"iter": 2000, "train_loss": 1.2597144842147827, "val_loss": 1.561498999595642, "lr": 0.0007054142744895884}
+{"iter": 2250, "train_loss": 1.2441972494125366, "val_loss": 1.5528626441955566, "lr": 0.0006360213829156177}
+{"iter": 2500, "train_loss": 1.201587438583374, "val_loss": 1.5335841178894043, "lr": 0.000564423209907245}
+{"iter": 2750, "train_loss": 1.1944845914840698, "val_loss": 1.5389137268066406, "lr": 0.0004924552772419723}
+{"iter": 3000, "train_loss": 1.16182541847229, "val_loss": 1.5361725091934204, "lr": 0.0004219625860160354}
+{"iter": 3250, "train_loss": 1.187941312789917, "val_loss": 1.5770058631896973, "lr": 0.00035475231739709885}
+{"iter": 3500, "train_loss": 1.1315793991088867, "val_loss": 1.5541470050811768, "lr": 0.0002925475029450237}
+{"iter": 3750, "train_loss": 1.124092936515808, "val_loss": 1.5581679344177246, "lr": 0.00023694285222843113}
+{"iter": 4000, "train_loss": 1.0955135822296143, "val_loss": 1.546109914779663, "lr": 0.00018936387015941957}
+{"iter": 4250, "train_loss": 1.1187591552734375, "val_loss": 1.5861767530441284, "lr": 0.00015103031213214996}
+{"iter": 4500, "train_loss": 1.104762315750122, "val_loss": 1.5901947021484375, "lr": 0.00012292491384519912}
+{"iter": 4750, "train_loss": 1.0807799100875854, "val_loss": 1.5813616514205933, "lr": 0.00010576819746349742}
+{"iter": 5000, "train_loss": 1.0858041048049927, "val_loss": 1.5896618366241455, "lr": 0.0001}

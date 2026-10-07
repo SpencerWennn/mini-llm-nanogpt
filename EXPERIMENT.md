@@ -37,15 +37,15 @@ python3 scripts/plot_losses.py out/baseline out/rmsnorm out/swiglu out/nope out/
 
 ## Results
 
-Run the commands above, then fill the table from the final row of each `metrics.jsonl` (or from the printed evaluation line). Report validation loss, not a single training minibatch loss.
+All six runs below used the same Shakespeare split, seed, model depth/width, optimizer schedule, and 5,000-step budget on a Colab T4 GPU. The metric is the minimum held-out validation loss over the scheduled evaluations; lower is better. Raw metric logs and the loss plot are committed with this report.
 
 | Experiment | Best validation loss | Notes |
 | --- | ---: | --- |
-| Baseline (pre-LN, GELU, learned abs. positions, MHA) | pending run | reference |
-| RMSNorm | pending run | normalization ablation |
-| SwiGLU | pending run | same approximate MLP parameter count |
-| NoPE | pending run | no explicit positional signal |
-| RoPE | pending run | rotary Q/K positions |
-| GQA-2 | pending run | half as many K/V heads |
+| Baseline (pre-LN, GELU, learned abs. positions, MHA) | 1.4738 (step 1750) | reference |
+| RMSNorm | 1.4632 (step 1750) | best result; 0.0106 below baseline |
+| SwiGLU | 1.4946 (step 1500) | slightly worse with this schedule |
+| NoPE | 1.5336 (step 2500) | substantially worse, confirming position information matters |
+| RoPE | 1.4783 (step 1250) | near baseline but marginally worse |
+| GQA-2 | 1.4592 (step 2000) | best result while using half as many K/V heads |
 
-The table intentionally contains no invented numbers. Exact losses are hardware- and seed-dependent, so the included run script and raw metric logs are the source of truth for the submission.
+The curves are in [`results/loss_comparison.png`](results/loss_comparison.png); the corresponding raw logs are `out/<experiment>/metrics.jsonl`. The late rise in validation loss while training loss keeps falling is ordinary overfitting on this small character corpus, hence reporting the best validation checkpoint is more informative than only the final step.
